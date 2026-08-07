@@ -9,7 +9,8 @@ Raspberry Pi + Adafruit RGB Matrix Bonnet — and, thanks to a drop-in emulator,
 Mac with **zero code changes**.
 
 Apps so far: **Cafe Menu**, which renders [Izzy's Cafe](https://izzybennett.com/izzys-cafe/)
-from the site's `/izzys-cafe.json` feed; **Weather**, current conditions from Open-Meteo;
+from the site's `/izzys-cafe.json` feed; **Weather**, current conditions from NWS station
+observations (Open-Meteo outside the US);
 and **Subway**, live next-train times from the MTA's realtime feeds.
 
 ---

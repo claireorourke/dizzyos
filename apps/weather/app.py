@@ -1,21 +1,24 @@
 """Weather app — current conditions for a configured location.
 
-Pulls a forecast from the free, keyless Open-Meteo API and renders a single static
-frame: a procedurally-drawn weather icon (sun/cloud/rain/snow/storm...) and the
-location on the left, and the current temperature, the day's high/low, and the local
-time on the right. Text uses the kernel's hand-designed bitmap font (services.fonts.pixel())
-so it stays crisp on the LED panel instead of smearing like an anti-aliased TTF.
-Falls back to a bundled snapshot if the API is unreachable, so the sign is never blank.
+Renders a single frame: a procedurally-drawn weather icon (sun/cloud/rain/snow/storm...)
+and the location on the left, and the current temperature, the day's high/low, and the
+local time on the right. Text uses the kernel's hand-designed bitmap font
+(services.fonts.pixel()) so it stays crisp on the LED panel instead of smearing like an
+anti-aliased TTF.
+
+The numbers come from `sources.fetch`, which prefers real NWS station observations and
+falls back to Open-Meteo's model outside US coverage — see `sources.py` for why that
+order matters. This module only renders; it never learns which service answered.
 """
 
 from datetime import datetime, timedelta, timezone
-from urllib.parse import urlencode
 
 from PIL import ImageDraw
 
 from kernel.app import App
 
-from apps.weather.icons import PHASES, category, draw_icon
+from apps.weather import sources
+from apps.weather.icons import PHASES, draw_icon
 
 # scale = bitmap-font pixel scale (1 = 5x7, 3 = 15x21...); color = RGB.
 PALETTE = {
@@ -26,15 +29,13 @@ PALETTE = {
     "time": {"scale": 1, "color": (255, 196, 84)},   # amber clock in the header
     "rain": {"scale": 1, "color": (120, 190, 255)},  # upcoming-rain alert (bottom)
     "humidity": {"scale": 1, "color": (130, 200, 185)},  # humidity (bottom, when no rain)
+    "now": {"scale": 1, "color": (255, 120, 120)},   # it's happening *now* — warmer, reads first
 }
 
-# Shown if the API can't be reached on first paint. Mild, clear, offset 0 (UTC) so
-# the clock still renders offline.
-FALLBACK = {
-    "utc_offset_seconds": 0,
-    "current": {"temperature_2m": 70, "weather_code": 1, "is_day": 1, "relative_humidity_2m": 50},
-    "daily": {"temperature_2m_max": [75], "temperature_2m_min": [60]},
-}
+# What the bottom row says when precipitation is being observed right now. Present
+# tense and no time at all: a clock time next to weather you can already hear reads
+# as a forecast, which is exactly the confusion this replaces.
+NOW_TEXT = {"storm": "Storm now", "rain": "Raining now", "snow": "Snowing now"}
 
 
 def _ellipsize(font, text, scale, max_w):
@@ -54,20 +55,8 @@ class WeatherApp(App):
 
     def refresh(self):
         lat, lon, self._label = self._resolve_location()
-        base = self.config.get("api_base", "https://api.open-meteo.com/v1/forecast")
-        params = {
-            "latitude": lat,
-            "longitude": lon,
-            "current": "temperature_2m,weather_code,is_day,relative_humidity_2m",
-            "hourly": "precipitation_probability",
-            "daily": "temperature_2m_max,temperature_2m_min",
-            "temperature_unit": "fahrenheit",
-            "timezone": "auto",
-            "forecast_days": 2,  # 48h of hourly, so "next rain" is found even late in the day
-        }
-        url = f"{base}?{urlencode(params)}"
         ttl = self.refresh_interval or 600
-        self._wx = self.services.data.get_json(url, ttl=ttl, fallback=FALLBACK)
+        self._wx = sources.fetch(self.services.data, lat, lon, self.config, ttl)
 
     def _resolve_location(self):
         """Return (lat, lon, label). Geocode `zipcode` via zippopotam.us when set,
@@ -97,25 +86,14 @@ class WeatherApp(App):
 
     # --- data extraction (pure, defensive against missing fields) ----------
     def _reading(self):
-        wx = self._wx or FALLBACK
-        current = wx.get("current") or {}
-        daily = wx.get("daily") or {}
-        highs = daily.get("temperature_2m_max") or []
-        lows = daily.get("temperature_2m_min") or []
-
-        def rounded(value):
-            return round(value) if isinstance(value, (int, float)) else None
-
+        """The normalized reading from `sources`, plus the two fields that have to be
+        recomputed every frame because they move with the clock."""
+        wx = self._wx or sources.FALLBACK
         now = self._local_now(wx.get("utc_offset_seconds", 0) or 0)
         return {
-            "temp": rounded(current.get("temperature_2m")),
-            "high": rounded(highs[0]) if highs else None,
-            "low": rounded(lows[0]) if lows else None,
-            "code": current.get("weather_code", 3),
-            "is_day": current.get("is_day", 1),
-            "humidity": rounded(current.get("relative_humidity_2m")),
+            **wx,
             "now": now,  # naive local time, ticks each frame (recomputed here)
-            "rain_at": self._next_rain(now),  # datetime of next likely rain, or None
+            "rain_at": self._next_rain(wx, now),  # datetime of next likely rain, or None
         }
 
     def _local_now(self, offset_seconds):
@@ -130,24 +108,22 @@ class WeatherApp(App):
             return dt.strftime("%H:%M")
         return dt.strftime("%I:%M %p").lstrip("0")
 
-    def _next_rain(self, now):
+    def _next_rain(self, wx, now):
         """Local `datetime` of the next hour within 24h whose precipitation probability
-        meets the threshold, or None if none does. `now` is naive local."""
-        wx = self._wx or {}
-        hourly = wx.get("hourly") or {}
-        times = hourly.get("time") or []
-        probs = hourly.get("precipitation_probability") or []
+        meets the threshold, or None if none does. `now` is naive local.
+
+        The window opens at the *top of the current hour*, not at `now`. Hourly buckets
+        are stamped with the hour they begin, so anchoring on `now` threw away the hour
+        already in progress — the one you are standing in. At 16:35 in a downpour the
+        16:00 bucket was skipped and the sign pointed at the next qualifying hour
+        instead, quietly turning rain happening now into rain happening later.
+        """
         threshold = self.config.get("rain_probability_threshold", 30)
+        start = now.replace(minute=0, second=0, microsecond=0)
         horizon = now + timedelta(hours=24)
-        for tstr, prob in zip(times, probs):
-            if not isinstance(prob, (int, float)) or prob < threshold:
-                continue
-            try:
-                t = datetime.fromisoformat(tstr)
-            except (ValueError, TypeError):
-                continue
-            if now <= t <= horizon:
-                return t
+        for moment, prob in wx.get("hourly") or []:
+            if isinstance(prob, (int, float)) and prob >= threshold and start <= moment <= horizon:
+                return moment
         return None
 
     # --- rendering ---------------------------------------------------------
@@ -178,7 +154,7 @@ class WeatherApp(App):
         # each time the launcher rotates back around to us.
         step = self.config.get("icon_frame_seconds", 0.5) or 0.5
         phase = int(t / step) % PHASES
-        draw_icon(image, 26, 33, category(reading["code"]), reading["is_day"], phase)
+        draw_icon(image, 26, 33, reading["category"], reading["is_day"], phase)
 
         # Body right: big current temperature. Shrink a size if 3 digits won't fit.
         rx = 52
@@ -201,8 +177,11 @@ class WeatherApp(App):
         pf.draw_text(draw, rx, hl_y, high_str, PALETTE["high"]["color"], scale=hs)
         pf.draw_text(draw, rx + gap, hl_y, low_str, PALETTE["low"]["color"], scale=hs)
 
-        # Bottom row: the upcoming-rain alert if any, otherwise current humidity.
-        if reading["rain_at"]:
+        # Bottom row, in order of what you'd want to know: precipitation being observed
+        # right now beats a forecast for later, which beats the humidity filler.
+        if reading.get("now_precip"):
+            key, text = "now", NOW_TEXT.get(reading["now_precip"], "Precip now")
+        elif reading["rain_at"]:
             key, text = "rain", f"Rain at {self._fmt_time(reading['rain_at'])}"
         elif reading["humidity"] is not None:
             key, text = "humidity", f"Humidity {reading['humidity']}%"

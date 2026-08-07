@@ -1,8 +1,9 @@
 name: Weather
-description: Current conditions, high/low, and local time from the free Open-Meteo API
+description: Observed conditions, high/low, and local time from NWS stations (Open-Meteo abroad)
 # Seconds this app stays on screen per rotation.
 dwell: 15
-# Re-fetch the forecast this often (seconds). 10 min is well under Open-Meteo's free limits.
+# Re-fetch this often (seconds). Well inside both services' free limits; station
+# observations only update once or twice an hour anyway.
 refresh_interval: 600
 # Location by ZIP / postal code, geocoded to coordinates via api.zippopotam.us.
 # Set `zipcode` to your area. For outside the US, set `country` to the ISO code
@@ -23,6 +24,25 @@ time_format: "12h"
 # is three times this. Lower is livelier — below ~0.2 the rain reads as flicker rather
 # than as falling — but on a sign glanced at rather than watched, slower is calmer.
 icon_frame_seconds: 0.8
+# Where the numbers come from:
+#   auto        NWS station observations in the US, Open-Meteo everywhere else
+#   nws         force NWS (US only — shows the offline snapshot elsewhere)
+#   open_meteo  force Open-Meteo, skipping observations entirely
+# "auto" is what you want. See apps/weather/sources.py for why NWS goes first.
+provider: "auto"
+# How many of the nearest NWS stations to poll for a current observation. The app walks
+# outward from the closest and takes the first one reporting usable conditions, because
+# the flagship city stations are often the sparsest — KNYC in Central Park routinely
+# reports no present weather at all.
+observation_stations: 5
+# Ignore observations older than this. Beyond ~90 min a station has usually just gone
+# quiet, and stale conditions are worse than falling back to the forecast.
+observation_max_age_minutes: 90
+# Show the storm icon if any station within this many km reports thunderstorms, even
+# when the nearest station is dry. Thunder and lightning carry well outside the rain,
+# so the storm is worth showing while you can still see it from the window.
+storm_radius_km: 25
 # APIs (rarely need changing).
+nws_base: "https://api.weather.gov"
 api_base: "https://api.open-meteo.com/v1/forecast"
 geocode_base: "https://api.zippopotam.us"

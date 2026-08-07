@@ -25,15 +25,15 @@ class DataService:
         self._clock = clock
         self._log = log
 
-    def get_json(self, url, ttl=300, fallback=None):
+    def get_json(self, url, ttl=300, fallback=None, headers=None):
         """Return parsed JSON for `url`, refetching only once older than `ttl`."""
-        return self._get("json", url, ttl, fallback)
+        return self._get("json", url, ttl, fallback, headers)
 
-    def get_bytes(self, url, ttl=300, fallback=None):
+    def get_bytes(self, url, ttl=300, fallback=None, headers=None):
         """Return the raw `bytes` at `url`, refetching only once older than `ttl`."""
-        return self._get("bytes", url, ttl, fallback)
+        return self._get("bytes", url, ttl, fallback, headers)
 
-    def _get(self, kind, url, ttl, fallback):
+    def _get(self, kind, url, ttl, fallback, headers=None):
         """Cached fetch. On failure: return the cached value if we have one, else
         `fallback` if provided, else re-raise."""
         key = (kind, url)
@@ -44,7 +44,7 @@ class DataService:
             return entry[1]
 
         try:
-            value = self._fetch(kind, url)
+            value = self._fetch(kind, url, headers)
         except Exception as exc:  # noqa: BLE001 - degrade gracefully on any error
             self._log(f"data: fetch failed for {url}: {exc}")
             if entry is not None:
@@ -58,9 +58,12 @@ class DataService:
         return value
 
     @staticmethod
-    def _fetch(kind, url):
+    def _fetch(kind, url, headers=None):
         if url.startswith(("http://", "https://")):
-            with urllib.request.urlopen(url, timeout=10) as resp:
+            # `headers` is not part of the cache key: a given URL is always fetched
+            # from one call site, so the same headers ride along with it every time.
+            request = urllib.request.Request(url, headers=headers or {})
+            with urllib.request.urlopen(request, timeout=10) as resp:
                 raw = resp.read()
         else:
             with open(url, "rb") as handle:
