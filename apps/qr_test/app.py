@@ -3,11 +3,11 @@
 Renders one static frame with two codes side by side so a single flash of the
 hardware answers both questions:
 
-  left   Version 1 at 2 LED px per module — the conservative variant. With its
-         4-module quiet zone it is 58x58, the largest code that fits the 64px
-         height at 2px. Byte mode holds 17 chars: a bare domain, no scheme.
-  right  Version 2 at 1 LED px per module (33x33) — the risky variant. If bloom
-         and the LED bezel grid don't defeat it, 1px unlocks full lowercase URLs.
+  left   Version 9 at 1 LED px per module — the stress test. 53x53 modules is
+         the densest code that fits the 64px height with its quiet zone (61x61);
+         182 bytes at EC M, enough for full URLs with paths.
+  right  Version 2 at 1 LED px per module (33x33) — the baseline 1px variant. If
+         bloom and the LED bezel grid don't defeat it, full lowercase URLs fit.
 
 Dark modules are unlit (the decoder wants dark-on-light), light modules render at
 `white_level` so bloom can be tuned without touching the global panel brightness.
@@ -20,10 +20,9 @@ from kernel.app import App
 QUIET = 4  # quiet-zone width in modules, per the QR spec
 
 # (config key, QR version, error-correction level, LED px per module)
-# V1 payloads get level L to maximize capacity (17 bytes); the 1px V2 code gets
-# level M so a few bloom-corrupted modules don't kill the read.
+# Both get level M so a few bloom-corrupted modules don't kill the read.
 VARIANTS = [
-    ("url_2px", 1, "L", 2),
+    ("url_stress", 9, "M", 1),
     ("url_1px", 2, "M", 1),
 ]
 
@@ -81,7 +80,7 @@ class QrTestApp(App):
         pf = self.services.fonts.pixel()
         draw = ImageDraw.Draw(frame)
 
-        # Left: the 2px code, vertically centered against the panel edge.
+        # Left: the dense stress-test code, vertically centered against the edge.
         big, big_scale = self._codes[0]
         big_size = len(big) * big_scale
         self._draw_code(frame, big, big_scale, 2, (frame.height - big_size) // 2, white)

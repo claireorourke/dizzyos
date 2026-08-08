@@ -4,13 +4,11 @@ description: Two QR scannability variants side by side, for testing on real pane
 #   make dev APP=qr_test          (Mac emulator)
 #   python run.py --app qr_test   (Pi)
 dwell: 30
-# Left code: Version 1 at 2 LED px per module (58x58 with quiet zone). Must stay
-# within V1 capacity: 17 chars in byte mode, or 25 in alphanumeric mode (digits,
-# A-Z, and $%*+-./: only). ALL-CAPS "HTTPS://..." uses alphanumeric mode, so a
-# full https URL fits — and the explicit scheme is what makes phone cameras offer
-# to OPEN the link rather than just showing decoded text (domains are
-# case-insensitive, so uppercase is safe here; paths wouldn't be).
-url_2px: "HTTPS://IZZYBENNETT.COM"
+# Left code: the stress test. Version 9 (53x53 modules) at 1 LED px per module is
+# the densest code that fits the 64px height with its quiet zone (61x61). Holds up
+# to 182 bytes at EC M — room for full lowercase URLs with paths. The version is
+# pinned, so shorter payloads just get padding; the code stays maximally dense.
+url_stress: "https://izzybennett.com/izzys-cafe/"
 # Right code: Version 2 at 1 LED px per module (33x33 with quiet zone). Room for a
 # full https URL (26 bytes at EC M) — the payload 1px would unlock if it scans.
 url_1px: "https://izzybennett.com"
