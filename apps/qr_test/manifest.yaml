@@ -1,0 +1,15 @@
+name: QR Test
+description: Two QR scannability variants side by side, for testing on real panels
+# Not in the default rotation — run it directly while testing:
+#   make dev APP=qr_test          (Mac emulator)
+#   python run.py --app qr_test   (Pi)
+dwell: 30
+# Left code: Version 1 at 2 LED px per module (58x58 with quiet zone). Byte mode
+# tops out at 17 chars, so this must stay a bare domain / very short link.
+url_2px: "izzybennett.com"
+# Right code: Version 2 at 1 LED px per module (33x33 with quiet zone). Room for a
+# full https URL (26 bytes at EC M) — the payload 1px would unlock if it scans.
+url_1px: "https://izzybennett.com"
+# Brightness of the "light" modules, 0-255. Lower it (e.g. 140) if LED bloom from
+# lit modules bleeds into dark ones and phones stop scanning the 1px code.
+white_level: 255
